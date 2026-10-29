@@ -34,14 +34,17 @@ grant insert on public.messages to service_role;
 grant usage, select on sequence public.messages_id_seq to service_role;
 
 drop policy if exists "Rooms are readable by everyone" on public.rooms;
+drop policy if exists "Rooms are available to the service" on public.rooms;
 create policy "Rooms are available to the service"
   on public.rooms for select to service_role using (true);
 
 drop policy if exists "Messages are readable by everyone" on public.messages;
+drop policy if exists "Messages are available to the service" on public.messages;
 create policy "Messages are available to the service"
   on public.messages for select to service_role using (true);
 
 drop policy if exists "Anyone can post valid room messages" on public.messages;
+drop policy if exists "Service can add messages" on public.messages;
 create policy "Service can add messages"
   on public.messages for insert to service_role with check (true);
 
