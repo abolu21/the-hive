@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f5f4ef">
+  <title>The Hive — Realtime Chat</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <main class="shell">
+    <aside class="rail">
+      <a class="brand" href="/" aria-label="The Hive home"><span class="brand-mark">h</span><span>the hive</span></a>
+      <div class="rail-bottom"><span class="status-dot"></span><span>Realtime rooms</span></div>
+    </aside>
+    <section class="workspace">
+      <header class="topbar">
+        <div><p class="eyebrow">YOUR SPACE</p><h1 id="room-heading">Join a room</h1></div>
+        <div class="connection"><span id="connection-dot"></span><span id="connection-label">Not connected</span></div>
+      </header>
+      <div class="layout">
+        <section class="chat-panel" aria-label="Chat">
+          <div id="welcome" class="welcome">
+            <div class="welcome-icon">✳</div><p class="eyebrow">GOOD CONVERSATIONS START HERE</p>
+            <h2>Find your people.</h2><p>Pick a room, choose a name, and jump into the conversation.</p>
+            <form id="join-form" class="join-form">
+              <label>Your name<input id="username" maxlength="20" placeholder="e.g. Ada" autocomplete="nickname" required></label>
+              <label>Choose a room<select id="room"></select></label>
+              <button type="submit">Join the room <span>↗</span></button>
+            </form>
+          </div>
+          <ol id="messages" class="messages" aria-live="polite" aria-label="Messages"></ol>
+          <div id="typing-line" class="typing-line" aria-live="polite"></div>
+          <form id="message-form" class="composer" hidden>
+            <div id="reply-preview" class="reply-preview" hidden>
+              <span><strong id="reply-author"></strong><span id="reply-text"></span></span>
+              <button id="cancel-reply" type="button" aria-label="Cancel reply">×</button>
+            </div>
+            <input id="message-input" maxlength="500" placeholder="Write a message… use @name to mention" autocomplete="off" aria-label="Message">
+            <span class="char-count" id="char-count">0 / 500</span>
+            <button aria-label="Send message" type="submit">↑</button>
+          </form>
+          <p id="notice" class="notice" role="status"></p>
+        </section>
+        <aside class="side-panel">
+          <div class="side-card"><div class="side-heading"><div><p class="eyebrow">IN THIS ROOM</p><h2>People</h2></div><span id="user-count" class="count">0</span></div>
+            <ul id="users" class="users"><li class="empty-users">Join a room to see who's here</li></ul>
+          </div>
+          <div class="tip-card"><span>✳</span><p><strong>A little reminder</strong><br>Good chats are built on curiosity and kindness.</p></div>
+          <button id="leave-button" class="leave-button" hidden>Leave room</button>
+        </aside>
+      </div>
+      <footer>Messages are saved so the conversation is here when you return.</footer>
+    </section>
+  </main>
+  <script type="module" src="/static/app.js"></script>
+</body>
+</html>
