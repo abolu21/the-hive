@@ -40,6 +40,7 @@ end
 return 0
 """
 CLAIM_ROOM_SLOT_SCRIPT = """
+if redis.call('GET', KEYS[3]) == 'closing' then return -2 end
 if not redis.call('SET', KEYS[1], ARGV[1], 'NX', 'EX', ARGV[2]) then
   return -1
 end
@@ -51,6 +52,16 @@ end
 redis.call('ZADD', KEYS[2], ARGV[4], ARGV[3])
 redis.call('EXPIRE', KEYS[2], tonumber(ARGV[2]) * 2)
 return 1
+"""
+RELEASE_ROOM_SLOT_SCRIPT = """
+redis.call('ZREM', KEYS[1], ARGV[1])
+if redis.call('GET', KEYS[2]) == ARGV[2] then redis.call('DEL', KEYS[2]) end
+redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', ARGV[3])
+if ARGV[4] == '1' and redis.call('ZCARD', KEYS[1]) == 0 then
+  redis.call('SET', KEYS[3], 'closing', 'EX', 300)
+  return 1
+end
+return 0
 """
 redis_client: Redis | None = None
 logger = logging.getLogger(__name__)
@@ -139,7 +150,9 @@ async def websocket_chat(socket: WebSocket):
     redis = None
     pubsub = None
     listener = None
-    room = username = member = name_key = None
+    room = username = member = name_key = presence_key = room_state_key = None
+    is_personal = False
+    slot_claimed = False
     connection_id = uuid.uuid4().hex
     send_lock = asyncio.Lock()
     message_timestamps = deque()
@@ -164,40 +177,45 @@ async def websocket_chat(socket: WebSocket):
         if not USERNAME_RE.fullmatch(username):
             await send({"type": "error", "message": "Username must be 1–20 characters"})
             return
-        try:
-            room_names = await database.get_rooms()
-        except Exception:
-            await send({"type": "error", "message": "Chat storage is unavailable"})
-            return
-        if not isinstance(requested_room, str) or requested_room not in room_names:
+        if not isinstance(requested_room, str) or not ROOM_NAME_RE.fullmatch(requested_room):
             await send({"type": "error", "message": "Unknown room"})
             return
         room = requested_room
         try:
-            room_capacity = await database.get_room_capacity(room)
+            room_settings = await database.get_room_settings(room)
         except Exception:
             await send({"type": "error", "message": "Could not load room capacity"})
             return
+        if room_settings is None:
+            await send({"type": "error", "message": "Unknown room"})
+            return
+        room_capacity = room_settings["capacity"]
+        is_personal = room_settings["is_personal"]
         try:
             redis = get_redis()
             pubsub = redis.pubsub()
             await pubsub.subscribe(f"chat:events:{room}")
             presence_key = f"chat:presence:{{{room}}}"
+            room_state_key = f"chat:room-state:{{{room}}}"
             username_digest = hashlib.sha256(username.casefold().encode("utf-8")).hexdigest()
             name_key = f"chat:username:{{{room}}}:{username_digest}"
             now = time.time()
             member = f"{connection_id}:{username}"
             claimed = await redis.eval(
-                CLAIM_ROOM_SLOT_SCRIPT, 2, name_key, presence_key,
+                CLAIM_ROOM_SLOT_SCRIPT, 3, name_key, presence_key, room_state_key,
                 connection_id, PRESENCE_TTL_SECONDS, member, now,
                 now - PRESENCE_TTL_SECONDS, room_capacity,
             )
+            if claimed == -2:
+                await send({"type": "error", "message": "This room has ended"})
+                return
             if claimed == -1:
                 await send({"type": "error", "message": "Username already used in this room"})
                 return
             if not claimed:
                 await send({"type": "error", "message": "This room is full"})
                 return
+            slot_claimed = True
         except Exception:
             logger.exception("Redis chat initialization failed")
             await send({"type": "error", "message": "Realtime service is unavailable"})
@@ -344,10 +362,18 @@ async def websocket_chat(socket: WebSocket):
                 pass
         if pubsub:
             await pubsub.aclose()
-        if redis and room and member:
-            await redis.zrem(f"chat:presence:{{{room}}}", member)
-            if name_key:
-                await redis.eval(RELEASE_USERNAME_SCRIPT, 1, name_key, connection_id)
+        if redis and room and member and slot_claimed:
+            should_delete = await redis.eval(
+                RELEASE_ROOM_SLOT_SCRIPT, 3, presence_key, name_key, room_state_key,
+                member, connection_id, time.time() - PRESENCE_TTL_SECONDS,
+                "1" if is_personal else "0",
+            )
+            if should_delete:
+                try:
+                    await database.delete_personal_room(room)
+                    await redis.delete(room_state_key)
+                except Exception:
+                    logger.exception("Could not delete empty personal room")
             await publish(redis, room, {"type": "typing", "username": username,
                                         "is_typing": False, "sender_id": connection_id})
             await publish(redis, room, {"type": "presence_update", "room": room,

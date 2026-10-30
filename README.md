@@ -56,7 +56,7 @@ Open the local URL printed by Vercel. Use two browser windows to test realtime b
 - **WebSocket server:** FastAPI validates `join_room`, `send_message`, and `typing` events at `/ws`.
 - **Persistence:** messages are inserted into Supabase Postgres before they are broadcast; new joiners receive the latest 50.
 - **Presence and fanout:** Redis holds expiring room membership and publishes events across Vercel instances.
-- **Rooms:** the directory includes AI, Politics, and Personal Development. People can stay connected to several rooms and switch between them. User-created rooms are listed publicly and enforce a 1–100 simultaneous-user limit.
+- **Rooms:** the directory includes AI, Politics, and Personal Development. People can stay connected to several rooms and switch between them. Personal rooms are unlisted, joinable by exact name, and enforce a 1–100 simultaneous-user limit. The room and its messages are deleted after its last member leaves.
 - **Abuse protection:** each connection is limited to five messages per ten seconds; room usernames are claimed atomically in Redis.
 - **Replies and mentions:** messages can reply to any loaded message in the room; `@name` and `@"name with spaces"` tags are accepted only while that user is present. Clicking a room member inserts their tag.
 - **UI:** the browser reconnects after disconnects, reloads history, and renders messages as text. The room dialog joins or creates a room while keeping other joined rooms connected.
@@ -81,7 +81,7 @@ Server events are `history` (`room`, `messages`), `message` (`id`, `room`, `user
 | GET | `/` | Chat UI |
 | GET | `/rooms` | Room names |
 | GET | `/rooms/catalog` | Room names, capacities, and room type |
-| POST | `/rooms` | Create a public personal room (`name`, `capacity`) |
+| POST | `/rooms` | Create an unlisted personal room (`name`, `capacity`) |
 | GET | `/health` | Health check |
 | WS | `/ws` | Realtime chat connection |
 

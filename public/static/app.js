@@ -15,6 +15,7 @@ const roomControls = document.querySelector('#room-controls');
 const joinedRoomsSelect = document.querySelector('#joined-rooms');
 const roomDialog = document.querySelector('#room-dialog');
 const availableRoomsSelect = document.querySelector('#available-rooms');
+const roomDialogUsername = document.querySelector('#room-username');
 const roomCatalog = new Map();
 const roomSessions = new Map();
 
@@ -27,6 +28,25 @@ function showNotice(text) {
   notice.textContent = text;
   window.clearTimeout(showNotice.timer);
   showNotice.timer = window.setTimeout(() => { notice.textContent = ''; }, 5000);
+}
+
+function openRoomDialog() {
+  document.querySelector('#room-dialog-notice').textContent = '';
+  roomDialogUsername.value = username || document.querySelector('#username').value.trim();
+  refreshRoomOptions();
+  roomDialog.showModal();
+}
+
+function applyRoomDialogUsername() {
+  const value = roomDialogUsername.value.trim();
+  if (!value || value.length > 20) {
+    document.querySelector('#room-dialog-notice').textContent = 'Enter a username between 1 and 20 characters.';
+    roomDialogUsername.focus();
+    return false;
+  }
+  username = value;
+  document.querySelector('#username').value = value;
+  return true;
 }
 
 function setConnected(connected) {
@@ -454,19 +474,28 @@ document.querySelector('#leave-button').addEventListener('click', () => {
 joinedRoomsSelect.addEventListener('change', () => activateRoom(joinedRoomsSelect.value));
 availableRoomsSelect.addEventListener('change', updateAvailableRoomInfo);
 document.querySelector('#manage-rooms').addEventListener('click', () => {
-  document.querySelector('#room-dialog-notice').textContent = '';
-  refreshRoomOptions();
-  roomDialog.showModal();
+  openRoomDialog();
 });
 document.querySelector('#initial-create-room').addEventListener('click', () => {
-  document.querySelector('#room-dialog-notice').textContent = '';
-  refreshRoomOptions();
-  roomDialog.showModal();
+  openRoomDialog();
 });
 document.querySelector('#close-room-dialog').addEventListener('click', () => roomDialog.close());
 document.querySelector('#join-listed-room').addEventListener('click', () => {
   const room = availableRoomsSelect.value;
-  if (!room) return;
+  if (!room || !applyRoomDialogUsername()) return;
+  roomDialog.close();
+  joinRoom(room);
+});
+
+document.querySelector('#join-private-room-form').addEventListener('submit', event => {
+  event.preventDefault();
+  const field = document.querySelector('#private-room-name');
+  const room = field.value.trim().toLowerCase();
+  if (!/^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/.test(room)) {
+    document.querySelector('#room-dialog-notice').textContent = 'Enter the exact room name using letters, numbers, and hyphens.';
+    return;
+  }
+  if (!applyRoomDialogUsername()) return;
   roomDialog.close();
   joinRoom(room);
 });
@@ -478,6 +507,7 @@ document.querySelector('#create-room-form').addEventListener('submit', async eve
   const noticeElement = document.querySelector('#room-dialog-notice');
   const submitButton = event.currentTarget.querySelector('button[type="submit"]');
   const capacity = Number(capacityInput.value);
+  if (!applyRoomDialogUsername()) return;
   if (!roomNameInput.value.trim() || !Number.isInteger(capacity) || capacity < 1 || capacity > 100) {
     noticeElement.textContent = 'Enter a room name and a capacity from 1 to 100.';
     return;
@@ -492,15 +522,14 @@ document.querySelector('#create-room-form').addEventListener('submit', async eve
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.detail || 'Could not create the room.');
-    roomCatalog.set(data.room.name, data.room);
-    roomSelect.value = data.room.name;
+    document.querySelector('#private-room-name').value = data.room.name;
     roomDialog.close();
     roomNameInput.value = '';
     capacityInput.value = '20';
     if (username || document.querySelector('#username').value.trim()) {
       joinRoom(data.room.name);
     } else {
-      showNotice('Room created. Enter your name, then join it.');
+      showNotice(`Room ${data.room.name} created. Enter your name, then join it by its exact name.`);
     }
   } catch (error) {
     noticeElement.textContent = error.message;

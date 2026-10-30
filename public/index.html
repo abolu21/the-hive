@@ -66,6 +66,7 @@
       <div><p class="eyebrow">YOUR SPACE</p><h2 id="room-dialog-title">Rooms</h2></div>
       <button id="close-room-dialog" class="dialog-close" type="button" aria-label="Close">×</button>
     </div>
+    <label class="room-dialog-username">Your username<input id="room-username" maxlength="20" placeholder="e.g. Ada" autocomplete="nickname" required></label>
     <section class="room-dialog-section">
       <h3>Join another room</h3>
       <label for="available-rooms">Available rooms</label>
@@ -73,9 +74,15 @@
       <p id="available-room-info" class="room-info"></p>
       <button id="join-listed-room" class="primary-button" type="button">Join room</button>
     </section>
+    <form id="join-private-room-form" class="room-dialog-section">
+      <h3>Join a private room</h3>
+      <p class="room-info">Enter the exact room name. Anyone who knows the name can join.</p>
+      <label>Enter the personal room name<input id="private-room-name" maxlength="40" placeholder="e.g. book-club" required></label>
+      <button class="primary-button" type="submit">Join by name</button>
+    </form>
     <form id="create-room-form" class="room-dialog-section create-room-form">
       <h3>Create a room</h3>
-      <p class="room-info">Personal rooms are public and anyone can join until they reach capacity.</p>
+      <p class="room-info">Private rooms are unlisted and are deleted when the last person leaves. Share the exact name only with people you want to join.</p>
       <label>Room name<input id="new-room-name" maxlength="40" placeholder="e.g. book-club" required></label>
       <label>Maximum people<input id="new-room-capacity" type="number" min="1" max="100" value="20" required></label>
       <button class="primary-button" type="submit">Create and join</button>

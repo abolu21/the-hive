@@ -36,6 +36,7 @@ class FakeRedis:
         self.sorted_sets = {}
         self.subscribers = {}
         self.locks = {}
+        self.values = {}
 
     def pubsub(self):
         return FakePubSub(self)
@@ -65,13 +66,32 @@ class FakeRedis:
     async def zrem(self, key, member):
         self.sorted_sets.setdefault(key, {}).pop(member, None)
 
+    async def delete(self, key):
+        self.values.pop(key, None)
+
     async def eval(self, script, numkeys, *args):
         keys = args[:numkeys]
         values = args[numkeys:]
         key = keys[0]
-        if "ZCARD" in script:
-            name_key, presence_key = keys
+        if "'ZREM'" in script and "'ZCARD'" in script:
+            presence_key, name_key, state_key = keys
+            member, connection_id, cutoff, is_personal = values
+            self.sorted_sets.setdefault(presence_key, {}).pop(member, None)
+            if self.locks.get(name_key) == connection_id:
+                self.locks.pop(name_key, None)
+            entries = self.sorted_sets.setdefault(presence_key, {})
+            for old_member, score in list(entries.items()):
+                if score <= float(cutoff):
+                    del entries[old_member]
+            if is_personal == "1" and not entries:
+                self.values[state_key] = "closing"
+                return 1
+            return 0
+        if "'ZCARD'" in script:
+            name_key, presence_key, state_key = keys
             connection_id, _, member, now, cutoff, capacity = values
+            if self.values.get(state_key) == "closing":
+                return -2
             if name_key in self.locks:
                 return -1
             self.locks[name_key] = connection_id
@@ -105,8 +125,10 @@ def configure_test_services(monkeypatch):
     async def get_rooms():
         return ["general", "football", "music"]
 
-    async def get_room_capacity(room):
-        return 100
+    async def get_room_settings(room):
+        if room not in {"general", "football", "music"}:
+            return None
+        return {"capacity": 100, "is_personal": False}
 
     async def get_room_catalog():
         return [{"name": room, "capacity": 100, "is_personal": False}
@@ -128,7 +150,7 @@ def configure_test_services(monkeypatch):
 
     monkeypatch.setattr(main, "get_redis", lambda: redis)
     monkeypatch.setattr(database, "get_rooms", get_rooms)
-    monkeypatch.setattr(database, "get_room_capacity", get_room_capacity)
+    monkeypatch.setattr(database, "get_room_settings", get_room_settings)
     monkeypatch.setattr(database, "get_room_catalog", get_room_catalog)
     monkeypatch.setattr(database, "get_history", get_history)
     monkeypatch.setattr(database, "get_message", get_message)
