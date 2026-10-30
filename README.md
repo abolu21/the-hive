@@ -7,7 +7,7 @@ A room chat served by FastAPI on Vercel. Browsers use a real WebSocket at `/ws` 
 ### Supabase message storage
 
 1. Create a Supabase project.
-2. Run [`supabase/schema.sql`](supabase/schema.sql) in the SQL Editor. It creates the three rooms and the messages table. If you already created the table, run it again to add the reply column.
+2. Run [`supabase/schema.sql`](supabase/schema.sql) in the SQL Editor. It creates the built-in rooms and messages table, and adds room capacity fields. Rerun it to apply schema updates safely.
 3. Copy the project URL and a secret API key (`sb_secret_...`) from **Project Settings → API Keys**.
 
 The secret key is used only by the FastAPI backend and bypasses RLS. Do not expose it to the browser or commit it to source control. The legacy service-role key is also accepted.
@@ -56,9 +56,10 @@ Open the local URL printed by Vercel. Use two browser windows to test realtime b
 - **WebSocket server:** FastAPI validates `join_room`, `send_message`, and `typing` events at `/ws`.
 - **Persistence:** messages are inserted into Supabase Postgres before they are broadcast; new joiners receive the latest 50.
 - **Presence and fanout:** Redis holds expiring room membership and publishes events across Vercel instances.
+- **Rooms:** the directory includes AI, Politics, and Personal Development. People can stay connected to several rooms and switch between them. User-created rooms are listed publicly and enforce a 1–100 simultaneous-user limit.
 - **Abuse protection:** each connection is limited to five messages per ten seconds; room usernames are claimed atomically in Redis.
 - **Replies and mentions:** messages can reply to any loaded message in the room; `@name` and `@"name with spaces"` tags are accepted only while that user is present. Clicking a room member inserts their tag.
-- **UI:** the browser reconnects after disconnects, reloads history, and renders messages as text.
+- **UI:** the browser reconnects after disconnects, reloads history, and renders messages as text. The room dialog joins or creates a room while keeping other joined rooms connected.
 - **Operations:** `/health` and `/rooms` are HTTP endpoints; tests cover multi-client delivery and invalid messages.
 
 ```text
@@ -78,7 +79,9 @@ Server events are `history` (`room`, `messages`), `message` (`id`, `room`, `user
 | Method | Path | Purpose |
 | --- | --- | --- |
 | GET | `/` | Chat UI |
-| GET | `/rooms` | Available rooms |
+| GET | `/rooms` | Room names |
+| GET | `/rooms/catalog` | Room names, capacities, and room type |
+| POST | `/rooms` | Create a public personal room (`name`, `capacity`) |
 | GET | `/health` | Health check |
 | WS | `/ws` | Realtime chat connection |
 

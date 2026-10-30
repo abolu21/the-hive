@@ -34,6 +34,50 @@ async def get_rooms() -> list[str]:
     return [row["name"] for row in response.json()]
 
 
+async def get_room_catalog() -> list[dict]:
+    base_url, secret_key, legacy_service_key = _settings()
+    async with httpx.AsyncClient(timeout=10) as client:
+        response = await client.get(
+            f"{base_url}/rest/v1/rooms",
+            params={"select": "name,capacity,is_personal", "order": "name.asc"},
+            headers=_headers(secret_key, legacy_service_key),
+        )
+    response.raise_for_status()
+    return response.json()
+
+
+async def get_room_capacity(room: str) -> int:
+    base_url, secret_key, legacy_service_key = _settings()
+    async with httpx.AsyncClient(timeout=10) as client:
+        response = await client.get(
+            f"{base_url}/rest/v1/rooms",
+            params={"select": "capacity", "name": f"eq.{room}", "limit": 1},
+            headers=_headers(secret_key, legacy_service_key),
+        )
+    response.raise_for_status()
+    rows = response.json()
+    if not rows:
+        raise RuntimeError("Room no longer exists")
+    return int(rows[0]["capacity"])
+
+
+async def create_room(name: str, capacity: int) -> dict:
+    base_url, secret_key, legacy_service_key = _settings()
+    async with httpx.AsyncClient(timeout=10) as client:
+        response = await client.post(
+            f"{base_url}/rest/v1/rooms",
+            params={"select": "name,capacity,is_personal"},
+            headers={**_headers(secret_key, legacy_service_key),
+                     "Prefer": "return=representation"},
+            json={"name": name, "capacity": capacity, "is_personal": True},
+        )
+    response.raise_for_status()
+    rows = response.json()
+    if not rows:
+        raise RuntimeError("Room creation returned no row")
+    return rows[0]
+
+
 async def get_history(room: str, limit: int = 50) -> list[dict]:
     base_url, secret_key, legacy_service_key = _settings()
     async with httpx.AsyncClient(timeout=10) as client:

@@ -2,8 +2,15 @@ create table if not exists public.rooms (
   name text primary key
 );
 
-insert into public.rooms (name)
-values ('general'), ('football'), ('music')
+alter table public.rooms
+  add column if not exists capacity integer not null default 100
+    check (capacity between 1 and 100),
+  add column if not exists is_personal boolean not null default false;
+
+insert into public.rooms (name, capacity, is_personal)
+values ('general', 100, false), ('football', 100, false), ('music', 100, false),
+       ('ai', 100, false), ('politics', 100, false),
+       ('personal-development', 100, false)
 on conflict (name) do nothing;
 
 create table if not exists public.messages (
@@ -30,6 +37,7 @@ alter table public.messages enable row level security;
 revoke all on public.rooms, public.messages from anon, authenticated;
 revoke all on sequence public.messages_id_seq from anon, authenticated;
 grant select on public.rooms, public.messages to service_role;
+grant insert on public.rooms to service_role;
 grant insert on public.messages to service_role;
 grant usage, select on sequence public.messages_id_seq to service_role;
 
@@ -37,6 +45,9 @@ drop policy if exists "Rooms are readable by everyone" on public.rooms;
 drop policy if exists "Rooms are available to the service" on public.rooms;
 create policy "Rooms are available to the service"
   on public.rooms for select to service_role using (true);
+drop policy if exists "Service can create rooms" on public.rooms;
+create policy "Service can create rooms"
+  on public.rooms for insert to service_role with check (true);
 
 drop policy if exists "Messages are readable by everyone" on public.messages;
 drop policy if exists "Messages are available to the service" on public.messages;

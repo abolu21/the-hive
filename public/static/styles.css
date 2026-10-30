@@ -31,3 +31,31 @@ body{min-height:0}
   .welcome{max-height:100%;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:20px 0}
   .reply-button{opacity:1}
 }
+.topbar{height:auto;min-height:118px;gap:14px;padding:14px 0}
+.topbar-controls,.room-controls{display:flex;align-items:center;gap:9px}
+.room-controls[hidden]{display:none}
+.room-controls select,.room-controls button,.room-dialog select,.room-dialog input{height:40px;border:1px solid var(--line);border-radius:9px;background:#fff;padding:0 11px;color:#343832;font:13px 'DM Sans',sans-serif}
+.room-controls select{max-width:180px;min-width:0}
+.room-controls button,.primary-button{border:0;border-radius:9px;background:var(--green);color:#fff;padding:0 13px;height:40px;font:600 12px 'DM Sans',sans-serif;white-space:nowrap;cursor:pointer}
+.join-form .secondary-button{height:40px;margin:0;border:1px solid var(--line);background:#fff;color:var(--green)}
+.visually-hidden{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.room-dialog{width:min(430px,calc(100vw - 28px));max-height:calc(100dvh - 28px);overflow:auto;border:1px solid var(--line);border-radius:18px;padding:23px;background:#fff;color:#282a26;box-shadow:0 20px 70px #252d2533}
+.room-dialog::backdrop{background:#20282077;backdrop-filter:blur(2px)}
+.room-dialog-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px}
+.room-dialog-header h2{font:800 23px Manrope,sans-serif;margin:0}
+.dialog-close{width:34px;height:34px;border:0;border-radius:9px;background:#f2f3ee;color:#60665d;font-size:22px;cursor:pointer}
+.room-dialog-section{display:grid;gap:9px;padding:16px 0;border-top:1px solid var(--line)}
+.room-dialog-section h3{font:700 15px Manrope,sans-serif;margin:0 0 3px}
+.room-dialog-section label{font-size:11px;font-weight:700;color:#60665d;display:grid;gap:7px}
+.room-dialog input{width:100%}
+.room-info,.room-dialog-notice{font-size:11px;color:#858981;min-height:15px;margin:0}
+.room-dialog-notice{color:#a75542}
+.create-room-form{padding-bottom:0}
+@media(max-width:760px){
+  .topbar{min-height:0;padding:11px 0;flex-wrap:wrap}
+  .topbar-controls{width:100%;justify-content:space-between}
+  .room-controls{flex:1;min-width:0}
+  .room-controls select{flex:1;max-width:none}
+  .connection{flex:0 0 auto}
+  .room-dialog{padding:19px}
+}

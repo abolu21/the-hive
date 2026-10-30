@@ -65,16 +65,34 @@ class FakeRedis:
     async def zrem(self, key, member):
         self.sorted_sets.setdefault(key, {}).pop(member, None)
 
-    async def eval(self, script, numkeys, key, *args):
+    async def eval(self, script, numkeys, *args):
+        keys = args[:numkeys]
+        values = args[numkeys:]
+        key = keys[0]
+        if "ZCARD" in script:
+            name_key, presence_key = keys
+            connection_id, _, member, now, cutoff, capacity = values
+            if name_key in self.locks:
+                return -1
+            self.locks[name_key] = connection_id
+            entries = self.sorted_sets.setdefault(presence_key, {})
+            for old_member, score in list(entries.items()):
+                if score <= float(cutoff):
+                    del entries[old_member]
+            if len(entries) >= int(capacity):
+                del self.locks[name_key]
+                return 0
+            entries[member] = float(now)
+            return 1
         if "'NX'" in script:
             if key in self.locks:
                 return 0
-            self.locks[key] = args[0]
+            self.locks[key] = values[0]
             return 1
         if "'EXPIRE'" in script:
-            return int(self.locks.get(key) == args[0])
+            return int(self.locks.get(key) == values[0])
         if "'DEL'" in script:
-            if self.locks.get(key) == args[0]:
+            if self.locks.get(key) == values[0]:
                 del self.locks[key]
                 return 1
             return 0
@@ -86,6 +104,13 @@ def configure_test_services(monkeypatch):
 
     async def get_rooms():
         return ["general", "football", "music"]
+
+    async def get_room_capacity(room):
+        return 100
+
+    async def get_room_catalog():
+        return [{"name": room, "capacity": 100, "is_personal": False}
+                for room in await get_rooms()]
 
     async def get_history(room, limit=50):
         return [message for message in messages if message["room"] == room][-limit:]
@@ -103,6 +128,8 @@ def configure_test_services(monkeypatch):
 
     monkeypatch.setattr(main, "get_redis", lambda: redis)
     monkeypatch.setattr(database, "get_rooms", get_rooms)
+    monkeypatch.setattr(database, "get_room_capacity", get_room_capacity)
+    monkeypatch.setattr(database, "get_room_catalog", get_room_catalog)
     monkeypatch.setattr(database, "get_history", get_history)
     monkeypatch.setattr(database, "get_message", get_message)
     monkeypatch.setattr(database, "add_message", add_message)

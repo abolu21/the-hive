@@ -12,6 +12,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 from redis.asyncio import Redis
 
 from app import database
@@ -22,15 +23,10 @@ PUBLIC_DIR = BASE_DIR / "public"
 USERNAME_RE = re.compile(r"[^\x00-\x1f]{1,20}")
 MAX_MESSAGE_LENGTH = 500
 MENTION_RE = re.compile(r'(?<![\w@])@"([^"\r\n]{1,20})"|(?<![\w@])@([^\s@,.:;!?()]+)')
+ROOM_NAME_RE = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?")
 PRESENCE_TTL_SECONDS = 45
 MESSAGE_RATE_LIMIT = 5
 MESSAGE_RATE_WINDOW_SECONDS = 10
-CLAIM_USERNAME_SCRIPT = """
-if redis.call('SET', KEYS[1], ARGV[1], 'NX', 'EX', ARGV[2]) then
-  return 1
-end
-return 0
-"""
 REFRESH_USERNAME_SCRIPT = """
 if redis.call('GET', KEYS[1]) == ARGV[1] then
   return redis.call('EXPIRE', KEYS[1], ARGV[2])
@@ -42,6 +38,19 @@ if redis.call('GET', KEYS[1]) == ARGV[1] then
   return redis.call('DEL', KEYS[1])
 end
 return 0
+"""
+CLAIM_ROOM_SLOT_SCRIPT = """
+if not redis.call('SET', KEYS[1], ARGV[1], 'NX', 'EX', ARGV[2]) then
+  return -1
+end
+redis.call('ZREMRANGEBYSCORE', KEYS[2], '-inf', ARGV[5])
+if redis.call('ZCARD', KEYS[2]) >= tonumber(ARGV[6]) then
+  redis.call('DEL', KEYS[1])
+  return 0
+end
+redis.call('ZADD', KEYS[2], ARGV[4], ARGV[3])
+redis.call('EXPIRE', KEYS[2], tonumber(ARGV[2]) * 2)
+return 1
 """
 redis_client: Redis | None = None
 logger = logging.getLogger(__name__)
@@ -58,7 +67,7 @@ def get_redis() -> Redis:
 
 
 async def online_users(redis: Redis, room: str) -> list[str]:
-    key = f"chat:presence:{room}"
+    key = f"chat:presence:{{{room}}}"
     await redis.zremrangebyscore(key, "-inf", time.time() - PRESENCE_TTL_SECONDS)
     members = await redis.zrange(key, 0, -1)
     return sorted((member.split(":", 1)[1] for member in members if ":" in member), key=str.casefold)
@@ -72,6 +81,11 @@ app = FastAPI(title="The Hive Realtime Chat")
 app.mount("/static", StaticFiles(directory=PUBLIC_DIR / "static"), name="static")
 
 
+class RoomCreate(BaseModel):
+    name: str
+    capacity: int
+
+
 @app.get("/")
 async def index():
     return FileResponse(PUBLIC_DIR / "index.html")
@@ -83,6 +97,33 @@ async def rooms():
         return {"rooms": await database.get_rooms()}
     except Exception as error:
         raise HTTPException(status_code=503, detail="Chat storage is unavailable") from error
+
+
+@app.get("/rooms/catalog")
+async def room_catalog():
+    try:
+        return {"rooms": await database.get_room_catalog()}
+    except Exception as error:
+        raise HTTPException(status_code=503, detail="Chat storage is unavailable") from error
+
+
+@app.post("/rooms", status_code=201)
+async def create_room(payload: RoomCreate):
+    room_name = payload.name.strip().lower()
+    room_name = re.sub(r"[\s_]+", "-", room_name)
+    room_name = re.sub(r"-+", "-", room_name)
+    if len(room_name) > 40 or not ROOM_NAME_RE.fullmatch(room_name):
+        raise HTTPException(status_code=400,
+                            detail="Room names must use 1–40 letters, numbers, and hyphens")
+    if isinstance(payload.capacity, bool) or not 1 <= payload.capacity <= 100:
+        raise HTTPException(status_code=400, detail="Room capacity must be between 1 and 100")
+    try:
+        return {"room": await database.create_room(room_name, payload.capacity)}
+    except Exception as error:
+        response = getattr(error, "response", None)
+        if response is not None and response.status_code == 409:
+            raise HTTPException(status_code=409, detail="A room with that name already exists") from error
+        raise HTTPException(status_code=503, detail="Could not create the room") from error
 
 
 @app.get("/health")
@@ -133,21 +174,30 @@ async def websocket_chat(socket: WebSocket):
             return
         room = requested_room
         try:
+            room_capacity = await database.get_room_capacity(room)
+        except Exception:
+            await send({"type": "error", "message": "Could not load room capacity"})
+            return
+        try:
             redis = get_redis()
             pubsub = redis.pubsub()
             await pubsub.subscribe(f"chat:events:{room}")
-            presence_key = f"chat:presence:{room}"
-            await redis.zremrangebyscore(presence_key, "-inf", time.time() - PRESENCE_TTL_SECONDS)
+            presence_key = f"chat:presence:{{{room}}}"
             username_digest = hashlib.sha256(username.casefold().encode("utf-8")).hexdigest()
-            name_key = f"chat:username:{room}:{username_digest}"
-            claimed = await redis.eval(CLAIM_USERNAME_SCRIPT, 1, name_key,
-                                       connection_id, PRESENCE_TTL_SECONDS)
-            if not claimed:
+            name_key = f"chat:username:{{{room}}}:{username_digest}"
+            now = time.time()
+            member = f"{connection_id}:{username}"
+            claimed = await redis.eval(
+                CLAIM_ROOM_SLOT_SCRIPT, 2, name_key, presence_key,
+                connection_id, PRESENCE_TTL_SECONDS, member, now,
+                now - PRESENCE_TTL_SECONDS, room_capacity,
+            )
+            if claimed == -1:
                 await send({"type": "error", "message": "Username already used in this room"})
                 return
-            member = f"{connection_id}:{username}"
-            await redis.zadd(presence_key, {member: time.time()})
-            await redis.expire(presence_key, PRESENCE_TTL_SECONDS * 2)
+            if not claimed:
+                await send({"type": "error", "message": "This room is full"})
+                return
         except Exception:
             logger.exception("Redis chat initialization failed")
             await send({"type": "error", "message": "Realtime service is unavailable"})
@@ -295,7 +345,7 @@ async def websocket_chat(socket: WebSocket):
         if pubsub:
             await pubsub.aclose()
         if redis and room and member:
-            await redis.zrem(f"chat:presence:{room}", member)
+            await redis.zrem(f"chat:presence:{{{room}}}", member)
             if name_key:
                 await redis.eval(RELEASE_USERNAME_SCRIPT, 1, name_key, connection_id)
             await publish(redis, room, {"type": "typing", "username": username,

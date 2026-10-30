@@ -16,7 +16,14 @@
     <section class="workspace">
       <header class="topbar">
         <div><p class="eyebrow">YOUR SPACE</p><h1 id="room-heading">Join a room</h1></div>
-        <div class="connection"><span id="connection-dot"></span><span id="connection-label">Not connected</span></div>
+        <div class="topbar-controls">
+          <div id="room-controls" class="room-controls" hidden>
+            <label class="visually-hidden" for="joined-rooms">Switch room</label>
+            <select id="joined-rooms" aria-label="Switch room"></select>
+            <button id="manage-rooms" type="button">+ Room</button>
+          </div>
+          <div class="connection"><span id="connection-dot"></span><span id="connection-label">Not connected</span></div>
+        </div>
       </header>
       <div class="layout">
         <section class="chat-panel" aria-label="Chat">
@@ -27,6 +34,7 @@
               <label>Your name<input id="username" maxlength="20" placeholder="e.g. Ada" autocomplete="nickname" required></label>
               <label>Choose a room<select id="room"></select></label>
               <button type="submit">Join the room <span>↗</span></button>
+              <button id="initial-create-room" class="secondary-button" type="button">Create a personal room</button>
             </form>
           </div>
           <ol id="messages" class="messages" aria-live="polite" aria-label="Messages"></ol>
@@ -53,6 +61,27 @@
       <footer>Messages are saved so the conversation is here when you return.</footer>
     </section>
   </main>
+  <dialog id="room-dialog" class="room-dialog" aria-labelledby="room-dialog-title">
+    <div class="room-dialog-header">
+      <div><p class="eyebrow">YOUR SPACE</p><h2 id="room-dialog-title">Rooms</h2></div>
+      <button id="close-room-dialog" class="dialog-close" type="button" aria-label="Close">×</button>
+    </div>
+    <section class="room-dialog-section">
+      <h3>Join another room</h3>
+      <label for="available-rooms">Available rooms</label>
+      <select id="available-rooms"></select>
+      <p id="available-room-info" class="room-info"></p>
+      <button id="join-listed-room" class="primary-button" type="button">Join room</button>
+    </section>
+    <form id="create-room-form" class="room-dialog-section create-room-form">
+      <h3>Create a room</h3>
+      <p class="room-info">Personal rooms are public and anyone can join until they reach capacity.</p>
+      <label>Room name<input id="new-room-name" maxlength="40" placeholder="e.g. book-club" required></label>
+      <label>Maximum people<input id="new-room-capacity" type="number" min="1" max="100" value="20" required></label>
+      <button class="primary-button" type="submit">Create and join</button>
+    </form>
+    <p id="room-dialog-notice" class="room-dialog-notice" role="status"></p>
+  </dialog>
   <script type="module" src="/static/app.js"></script>
 </body>
 </html>

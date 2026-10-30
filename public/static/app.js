@@ -11,20 +11,17 @@ const connection = document.querySelector('.connection');
 const replyPreview = document.querySelector('#reply-preview');
 const replyAuthor = document.querySelector('#reply-author');
 const replyText = document.querySelector('#reply-text');
+const roomControls = document.querySelector('#room-controls');
+const joinedRoomsSelect = document.querySelector('#joined-rooms');
+const roomDialog = document.querySelector('#room-dialog');
+const availableRoomsSelect = document.querySelector('#available-rooms');
+const roomCatalog = new Map();
+const roomSessions = new Map();
 
-let socket = null;
 let username = '';
 let currentRoom = '';
-let typingTimer = null;
-let reconnectTimer = null;
 let replyTarget = null;
-let joined = false;
-let shouldReconnect = false;
-let reconnectDelay = 1000;
-let typingUsers = new Set();
 let lastTypingSent = 0;
-const messageById = new Map();
-const pendingMessages = new Map();
 
 function showNotice(text) {
   notice.textContent = text;
@@ -111,9 +108,9 @@ function scrollToMessage(id) {
   }
 }
 
-function addMessage(message) {
+function renderMessage(message, session) {
   const messageId = String(message.id);
-  if (messageById.has(messageId)) return;
+  const parentMessageMap = session.messageById;
 
   const item = document.createElement('li');
   item.className = 'message' + (message.username === username ? ' mine' : '');
@@ -124,7 +121,7 @@ function addMessage(message) {
   const date = new Date(message.created_at);
   meta.textContent = `${message.username} · ${Number.isNaN(date.getTime()) ? '' : date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
 
-  const parent = message.reply_to || messageById.get(String(message.reply_to_id));
+  const parent = message.reply_to || parentMessageMap.get(String(message.reply_to_id));
   if (message.reply_to_id) {
     const reference = document.createElement('button');
     reference.type = 'button';
@@ -150,126 +147,259 @@ function addMessage(message) {
   item.append(replyButton);
 
   messages.append(item);
-  messageById.set(messageId, message);
-  [...messages.children]
-    .sort((first, second) => Number(first.dataset.messageId) - Number(second.dataset.messageId))
-    .forEach(node => messages.append(node));
   messages.scrollTop = messages.scrollHeight;
 }
 
-function sendTyping(isTyping) {
+function renderMessages(session) {
+  messages.replaceChildren();
+  session.messageById = new Map(session.history.map(message => [String(message.id), message]));
+  session.history
+    .slice()
+    .sort((first, second) => Number(first.id) - Number(second.id))
+    .forEach(message => renderMessage(message, session));
+}
+
+function addMessage(message, session) {
+  const id = String(message.id);
+  if (session.messageById.has(id)) return;
+  session.messageById.set(id, message);
+  session.history.push(message);
+  if (session.history.length > 200) {
+    const removed = session.history.shift();
+    session.messageById.delete(String(removed.id));
+  }
+  if (session.room === currentRoom) {
+    renderMessages(session);
+  }
+}
+
+function sendTyping(isTyping, room = currentRoom) {
+  const socket = roomSessions.get(room)?.socket;
   if (socket?.readyState === WebSocket.OPEN) {
     socket.send(JSON.stringify({ type: 'typing', is_typing: isTyping }));
   }
 }
 
-function closeRoom() {
-  shouldReconnect = false;
-  joined = false;
-  window.clearTimeout(reconnectTimer);
-  window.clearTimeout(typingTimer);
-  const oldSocket = socket;
-  socket = null;
-  if (oldSocket) oldSocket.close();
-  setConnected(false);
-  renderUsers([]);
-  typingUsers.clear();
-  typingLine.textContent = '';
+function roomTitle(room) {
+  if (room === 'ai') return 'AI';
+  return room.split('-').map(word => word[0].toUpperCase() + word.slice(1)).join(' ');
 }
 
-function connect() {
-  if (!shouldReconnect) return;
-  joined = false;
+function refreshRoomOptions() {
+  const rooms = [...roomCatalog.values()].sort((a, b) => a.name.localeCompare(b.name));
+  roomSelect.replaceChildren(...rooms.map(room => {
+    const option = document.createElement('option');
+    option.value = room.name;
+    option.textContent = roomTitle(room.name);
+    return option;
+  }));
+  const available = rooms.filter(room => !roomSessions.has(room.name));
+  availableRoomsSelect.replaceChildren(...available.map(room => {
+    const option = document.createElement('option');
+    option.value = room.name;
+    option.textContent = `${roomTitle(room.name)} · up to ${room.capacity}`;
+    return option;
+  }));
+  document.querySelector('#join-listed-room').disabled = !available.length;
+  if (!available.length) document.querySelector('#available-room-info').textContent = 'You have joined every room.';
+  else updateAvailableRoomInfo();
+}
+
+function updateAvailableRoomInfo() {
+  const room = roomCatalog.get(availableRoomsSelect.value);
+  document.querySelector('#available-room-info').textContent = room
+    ? `${room.is_personal ? 'Personal room' : 'Public room'} · maximum ${room.capacity} people`
+    : '';
+}
+
+function refreshJoinedRooms() {
+  const sessions = [...roomSessions.values()];
+  roomControls.hidden = sessions.length === 0;
+  joinedRoomsSelect.replaceChildren(...sessions.map(session => {
+    const option = document.createElement('option');
+    option.value = session.room;
+    option.textContent = roomTitle(session.room);
+    return option;
+  }));
+  joinedRoomsSelect.value = currentRoom;
+  refreshRoomOptions();
+}
+
+function renderActiveRoom() {
+  const session = roomSessions.get(currentRoom);
+  if (!session) return;
+  welcome.hidden = true;
+  messages.style.display = 'flex';
+  composer.hidden = !session.joined;
+  document.querySelector('#leave-button').hidden = !session.joined;
+  document.querySelector('#room-heading').textContent = roomTitle(currentRoom);
+  renderMessages(session);
+  renderUsers(session.users);
+  renderTyping(session);
+  setConnected(session.joined);
+}
+
+function renderTyping(session) {
+  typingLine.textContent = session.typingUsers.size
+    ? `${[...session.typingUsers].join(', ')} ${session.typingUsers.size === 1 ? 'is' : 'are'} typing…`
+    : '';
+}
+
+function showLobby() {
+  currentRoom = '';
+  welcome.hidden = false;
+  messages.style.display = 'none';
+  messages.replaceChildren();
+  messageInput.value = '';
+  document.querySelector('#char-count').textContent = '0 / 500';
+  composer.hidden = true;
+  document.querySelector('#leave-button').hidden = true;
+  document.querySelector('#room-heading').textContent = 'Join a room';
+  renderUsers([]);
+  typingLine.textContent = '';
+  setConnected(false);
+  refreshJoinedRooms();
+}
+
+function activateRoom(room) {
+  const session = roomSessions.get(room);
+  if (!session) return;
+  const previous = roomSessions.get(currentRoom);
+  if (previous && currentRoom !== room) previous.draft = messageInput.value;
+  currentRoom = room;
+  joinedRoomsSelect.value = room;
+  messageInput.value = session.draft || '';
+  document.querySelector('#char-count').textContent = `${messageInput.value.length} / 500`;
+  clearReplyTarget();
+  renderActiveRoom();
+}
+
+function leaveRoom(room) {
+  const session = roomSessions.get(room);
+  if (!session) return;
+  session.shouldReconnect = false;
+  window.clearTimeout(session.reconnectTimer);
+  window.clearTimeout(session.typingTimer);
+  if (session.socket) session.socket.close();
+  roomSessions.delete(room);
+  refreshJoinedRooms();
+  if (currentRoom !== room) return;
+  clearReplyTarget();
+  const nextRoom = roomSessions.keys().next().value;
+  if (nextRoom) activateRoom(nextRoom);
+  else showLobby();
+}
+
+function connectRoom(session) {
+  if (!session.shouldReconnect) return;
   const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const nextSocket = new WebSocket(`${scheme}//${location.host}/ws`);
-  socket = nextSocket;
-  setConnected(false);
+  session.socket = nextSocket;
+  if (session.room === currentRoom) setConnected(false);
 
   nextSocket.addEventListener('open', () => {
-    if (nextSocket !== socket) return;
-    nextSocket.send(JSON.stringify({ type: 'join_room', username, room: currentRoom }));
+    if (nextSocket !== session.socket || !session.shouldReconnect) return;
+    nextSocket.send(JSON.stringify({ type: 'join_room', username, room: session.room }));
   });
 
   nextSocket.addEventListener('message', event => {
-    if (nextSocket !== socket) return;
+    if (nextSocket !== session.socket) return;
     let data;
     try { data = JSON.parse(event.data); } catch { return; }
-
     if (data.type === 'history') {
-      messages.replaceChildren();
-      messageById.clear();
-      data.messages.forEach(addMessage);
-      welcome.hidden = true;
-      messages.style.display = 'flex';
-      composer.hidden = false;
-      document.querySelector('#leave-button').hidden = false;
-      document.querySelector('#room-heading').textContent = currentRoom[0].toUpperCase() + currentRoom.slice(1);
-      joined = true;
-      setConnected(true);
-      reconnectDelay = 1000;
+      session.history = data.messages || [];
+      session.messageById = new Map(session.history.map(message => [String(message.id), message]));
+      session.joined = true;
+      session.reconnectDelay = 1000;
+      if (session.room === currentRoom) renderActiveRoom();
     } else if (data.type === 'message') {
-      if (data.client_message_id) pendingMessages.delete(data.client_message_id);
-      addMessage(data);
-      if ((data.mentions || []).some(name => name.toLocaleLowerCase() === username.toLocaleLowerCase())) {
+      if (data.client_message_id) session.pendingMessages.delete(data.client_message_id);
+      addMessage(data, session);
+      if (session.room === currentRoom && (data.mentions || []).some(name => name.toLocaleLowerCase() === username.toLocaleLowerCase())) {
         showNotice(`${data.username} mentioned you.`);
       }
     } else if (data.type === 'presence_update') {
-      renderUsers(data.users);
+      session.users = data.users || [];
+      if (session.room === currentRoom) renderUsers(session.users);
     } else if (data.type === 'typing') {
       if (data.username === username) return;
-      if (data.is_typing) typingUsers.add(data.username);
-      else typingUsers.delete(data.username);
-      typingLine.textContent = typingUsers.size
-        ? `${[...typingUsers].join(', ')} ${typingUsers.size === 1 ? 'is' : 'are'} typing…`
-        : '';
+      if (data.is_typing) session.typingUsers.add(data.username);
+      else session.typingUsers.delete(data.username);
+      if (session.room === currentRoom) renderTyping(session);
     } else if (data.type === 'ping') {
       nextSocket.send(JSON.stringify({ type: 'pong' }));
     } else if (data.type === 'error') {
-      const pending = data.client_message_id ? pendingMessages.get(data.client_message_id) : null;
-      if (data.client_message_id) pendingMessages.delete(data.client_message_id);
-      showNotice(data.message);
-      if (pending) {
+      const pending = data.client_message_id ? session.pendingMessages.get(data.client_message_id) : null;
+      if (data.client_message_id) session.pendingMessages.delete(data.client_message_id);
+      if (session.room === currentRoom) showNotice(data.message);
+      if (pending && session.room === currentRoom) {
         messageInput.value = messageInput.value
           ? `${pending.text}\n${messageInput.value}`.slice(0, 500)
           : pending.text;
+        session.draft = messageInput.value;
         document.querySelector('#char-count').textContent = `${messageInput.value.length} / 500`;
         if (pending.replyTarget && !replyTarget) setReplyTarget(pending.replyTarget);
       }
-      if (!joined) {
-        shouldReconnect = false;
+      if (!session.joined) {
+        session.shouldReconnect = false;
         nextSocket.close();
+        roomSessions.delete(session.room);
+        refreshJoinedRooms();
+        if (session.room === currentRoom) {
+          const nextRoom = roomSessions.keys().next().value;
+          if (nextRoom) activateRoom(nextRoom);
+          else showLobby();
+          showNotice(data.message);
+        }
       }
     }
   });
 
   nextSocket.addEventListener('close', () => {
-    if (nextSocket !== socket) return;
-    setConnected(false);
-    if (shouldReconnect) {
+    if (nextSocket !== session.socket || !session.shouldReconnect) return;
+    if (session.room === currentRoom) {
+      setConnected(false);
       showNotice('Connection interrupted. Reconnecting…');
-      reconnectTimer = window.setTimeout(connect, reconnectDelay);
-      reconnectDelay = Math.min(reconnectDelay * 2, 15000);
-    } else if (welcome.hidden) {
-      composer.hidden = true;
-      document.querySelector('#leave-button').hidden = true;
-      showNotice('Disconnected from chat. Join again to continue.');
     }
+    session.reconnectTimer = window.setTimeout(() => connectRoom(session), session.reconnectDelay);
+    session.reconnectDelay = Math.min(session.reconnectDelay * 2, 15000);
   });
 
-  nextSocket.addEventListener('error', () => showNotice('Could not connect to chat. Check the WebSocket deployment.'));
+  nextSocket.addEventListener('error', () => {
+    if (session.room === currentRoom) showNotice('Could not connect to chat. Check the WebSocket deployment.');
+  });
+}
+
+function joinRoom(room) {
+  if (!room) return;
+  if (!username) username = document.querySelector('#username').value.trim();
+  if (!username || username.length > 20) {
+    showNotice('Enter a name between 1 and 20 characters first.');
+    return;
+  }
+  if (roomSessions.has(room)) {
+    activateRoom(room);
+    return;
+  }
+  const session = {
+    room, socket: null, joined: false, shouldReconnect: true, reconnectDelay: 1000,
+    reconnectTimer: null, history: [], messageById: new Map(), users: [],
+    typingUsers: new Set(), pendingMessages: new Map(), draft: '',
+  };
+  roomSessions.set(room, session);
+  refreshJoinedRooms();
+  activateRoom(room);
+  connectRoom(session);
 }
 
 async function loadRooms() {
   try {
-    const response = await fetch('/rooms');
+    const response = await fetch('/rooms/catalog');
     if (!response.ok) throw new Error('Room list unavailable');
     const data = await response.json();
-    roomSelect.replaceChildren(...data.rooms.map(room => {
-      const option = document.createElement('option');
-      option.value = room;
-      option.textContent = room[0].toUpperCase() + room.slice(1);
-      return option;
-    }));
+    roomCatalog.clear();
+    data.rooms.forEach(room => roomCatalog.set(room.name, room));
+    refreshRoomOptions();
   } catch {
     showNotice('Could not load rooms. Refresh and try again.');
   }
@@ -278,29 +408,25 @@ async function loadRooms() {
 joinForm.addEventListener('submit', event => {
   event.preventDefault();
   username = document.querySelector('#username').value.trim();
-  currentRoom = roomSelect.value;
   if (!username || username.length > 20) return showNotice('Name must be between 1 and 20 characters.');
-  closeRoom();
-  messages.replaceChildren();
-  messageById.clear();
-  clearReplyTarget();
-  shouldReconnect = true;
-  connect();
+  joinRoom(roomSelect.value);
 });
 
 composer.addEventListener('submit', event => {
   event.preventDefault();
   const text = messageInput.value.trim();
-  if (!text || socket?.readyState !== WebSocket.OPEN) return;
+  const session = roomSessions.get(currentRoom);
+  if (!text || session?.socket?.readyState !== WebSocket.OPEN) return;
   const clientMessageId = crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`;
-  pendingMessages.set(clientMessageId, { text, replyTarget });
-  socket.send(JSON.stringify({
+  session.pendingMessages.set(clientMessageId, { text, replyTarget });
+  session.socket.send(JSON.stringify({
     type: 'send_message',
     text,
     reply_to_id: replyTarget?.id ?? null,
     client_message_id: clientMessageId,
   }));
   messageInput.value = '';
+  session.draft = '';
   document.querySelector('#char-count').textContent = '0 / 500';
   clearReplyTarget();
   sendTyping(false);
@@ -308,27 +434,79 @@ composer.addEventListener('submit', event => {
 
 messageInput.addEventListener('input', () => {
   document.querySelector('#char-count').textContent = `${messageInput.value.length} / 500`;
-  if (socket?.readyState === WebSocket.OPEN && Date.now() - lastTypingSent > 800) {
+  const session = roomSessions.get(currentRoom);
+  if (session) session.draft = messageInput.value;
+  if (session?.socket?.readyState === WebSocket.OPEN && Date.now() - lastTypingSent > 800) {
     sendTyping(true);
     lastTypingSent = Date.now();
   }
-  window.clearTimeout(typingTimer);
-  typingTimer = window.setTimeout(() => sendTyping(false), 1200);
+  window.clearTimeout(session?.typingTimer);
+  if (session) session.typingTimer = window.setTimeout(() => sendTyping(false, session.room), 1200);
 });
 
 document.querySelector('#cancel-reply').addEventListener('click', clearReplyTarget);
 
 document.querySelector('#leave-button').addEventListener('click', () => {
   if (!window.confirm('Leave this room?')) return;
-  closeRoom();
-  welcome.hidden = false;
-  messages.style.display = 'none';
-  messages.replaceChildren();
-  messageById.clear();
-  composer.hidden = true;
-  clearReplyTarget();
-  document.querySelector('#leave-button').hidden = true;
-  document.querySelector('#room-heading').textContent = 'Join a room';
+  leaveRoom(currentRoom);
+});
+
+joinedRoomsSelect.addEventListener('change', () => activateRoom(joinedRoomsSelect.value));
+availableRoomsSelect.addEventListener('change', updateAvailableRoomInfo);
+document.querySelector('#manage-rooms').addEventListener('click', () => {
+  document.querySelector('#room-dialog-notice').textContent = '';
+  refreshRoomOptions();
+  roomDialog.showModal();
+});
+document.querySelector('#initial-create-room').addEventListener('click', () => {
+  document.querySelector('#room-dialog-notice').textContent = '';
+  refreshRoomOptions();
+  roomDialog.showModal();
+});
+document.querySelector('#close-room-dialog').addEventListener('click', () => roomDialog.close());
+document.querySelector('#join-listed-room').addEventListener('click', () => {
+  const room = availableRoomsSelect.value;
+  if (!room) return;
+  roomDialog.close();
+  joinRoom(room);
+});
+
+document.querySelector('#create-room-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const roomNameInput = document.querySelector('#new-room-name');
+  const capacityInput = document.querySelector('#new-room-capacity');
+  const noticeElement = document.querySelector('#room-dialog-notice');
+  const submitButton = event.currentTarget.querySelector('button[type="submit"]');
+  const capacity = Number(capacityInput.value);
+  if (!roomNameInput.value.trim() || !Number.isInteger(capacity) || capacity < 1 || capacity > 100) {
+    noticeElement.textContent = 'Enter a room name and a capacity from 1 to 100.';
+    return;
+  }
+  submitButton.disabled = true;
+  noticeElement.textContent = 'Creating room…';
+  try {
+    const response = await fetch('/rooms', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: roomNameInput.value, capacity }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || 'Could not create the room.');
+    roomCatalog.set(data.room.name, data.room);
+    roomSelect.value = data.room.name;
+    roomDialog.close();
+    roomNameInput.value = '';
+    capacityInput.value = '20';
+    if (username || document.querySelector('#username').value.trim()) {
+      joinRoom(data.room.name);
+    } else {
+      showNotice('Room created. Enter your name, then join it.');
+    }
+  } catch (error) {
+    noticeElement.textContent = error.message;
+  } finally {
+    submitButton.disabled = false;
+  }
 });
 
 loadRooms();
