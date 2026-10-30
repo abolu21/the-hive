@@ -27,7 +27,7 @@ async def get_rooms() -> list[str]:
     async with httpx.AsyncClient(timeout=10) as client:
         response = await client.get(
             f"{base_url}/rest/v1/rooms",
-            params={"select": "name", "order": "name.asc"},
+            params={"select": "name", "is_personal": "eq.false", "order": "name.asc"},
             headers=_headers(secret_key, legacy_service_key),
         )
     response.raise_for_status()
@@ -39,26 +39,28 @@ async def get_room_catalog() -> list[dict]:
     async with httpx.AsyncClient(timeout=10) as client:
         response = await client.get(
             f"{base_url}/rest/v1/rooms",
-            params={"select": "name,capacity,is_personal", "order": "name.asc"},
+            params={"select": "name,capacity,is_personal", "is_personal": "eq.false",
+                    "order": "name.asc"},
             headers=_headers(secret_key, legacy_service_key),
         )
     response.raise_for_status()
     return response.json()
 
 
-async def get_room_capacity(room: str) -> int:
+async def get_room_settings(room: str) -> dict | None:
     base_url, secret_key, legacy_service_key = _settings()
     async with httpx.AsyncClient(timeout=10) as client:
         response = await client.get(
             f"{base_url}/rest/v1/rooms",
-            params={"select": "capacity", "name": f"eq.{room}", "limit": 1},
+            params={"select": "capacity,is_personal", "name": f"eq.{room}", "limit": 1},
             headers=_headers(secret_key, legacy_service_key),
         )
     response.raise_for_status()
     rows = response.json()
     if not rows:
-        raise RuntimeError("Room no longer exists")
-    return int(rows[0]["capacity"])
+        return None
+    return {"capacity": int(rows[0]["capacity"]),
+            "is_personal": bool(rows[0]["is_personal"])}
 
 
 async def create_room(name: str, capacity: int) -> dict:
@@ -76,6 +78,17 @@ async def create_room(name: str, capacity: int) -> dict:
     if not rows:
         raise RuntimeError("Room creation returned no row")
     return rows[0]
+
+
+async def delete_personal_room(name: str) -> None:
+    base_url, secret_key, legacy_service_key = _settings()
+    async with httpx.AsyncClient(timeout=10) as client:
+        response = await client.delete(
+            f"{base_url}/rest/v1/rooms",
+            params={"name": f"eq.{name}", "is_personal": "eq.true"},
+            headers={**_headers(secret_key, legacy_service_key), "Prefer": "return=minimal"},
+        )
+    response.raise_for_status()
 
 
 async def get_history(room: str, limit: int = 50) -> list[dict]:
