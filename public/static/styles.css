@@ -60,3 +60,38 @@ body{min-height:0}
   .connection{flex:0 0 auto}
   .room-dialog{padding:19px}
 }
+
+/* Dark Hive palette */
+:root{color:#e5ebe3;background:#111711;--green:#4f8059;--muted:#a0ad9f;--line:#303b31;--paper:#1b241c}
+body{background:#111711;color:#e5ebe3}
+.rail{background:#18221a}
+.brand,.topbar h1,.side-heading h2,.welcome h2,.room-dialog-header h2{color:#edf3eb}
+.brand-mark,.join-form button,.composer button,.room-controls button,.primary-button{background:#4f8059}
+.rail-bottom,.connection,.welcome>p:not(.eyebrow),.eyebrow,footer,.message-meta,.char-count,.typing-line{color:#a0ad9f}
+.status-dot,#connection-dot,.connection.online #connection-dot{background:#83bf8b}
+.connection #connection-dot{background:#667267}
+.topbar,.chat-panel,.side-card,.room-dialog,.composer,.leave-button{border-color:#303b31}
+.chat-panel,.side-card,.room-dialog,.leave-button{background:#1b241c}
+.welcome-icon,.count,.avatar{background:#26372a;color:#b7dfbb}
+.join-form label,.room-dialog-section label,.room-dialog-username{color:#c4cec2}
+.join-form input,.join-form select,.composer input,.room-dialog select,.room-dialog input,.room-controls select,.room-controls button{background:#131a14;color:#e5ebe3;border-color:#3a493b}
+.join-form input::placeholder,.composer input::placeholder,.room-dialog input::placeholder{color:#879487}
+.join-form input:focus,.join-form select:focus,.composer input:focus,.room-dialog input:focus,.room-dialog select:focus{border-color:#7eaf84;box-shadow:0 0 0 3px #304733}
+.bubble{background:#28322a;color:#e5ebe3}
+.mine .bubble{background:#304a34;color:#eaf2e9}
+.users li{color:#d4ddd2;border-color:#303b31}
+.empty-users{color:#a0ad9f!important}
+.tip-card{background:#222f24;border-color:#303b31}
+.tip-card p,.room-info{color:#aeb9ad}
+.tip-card strong{color:#e1eadf}
+.leave-button{color:#c2ccc1}
+.reply-preview{background:#222d24;border-left-color:#7eaf84;color:#c3cdc2}
+.reply-preview strong,.reply-reference{color:#a6d3aa}
+.reply-preview button,.reply-button{color:#a0ad9f}
+.mention-token{color:#c4ebc8;background:#2b4130}
+.message-highlight .bubble{outline-color:#8cbd91}
+.room-dialog::backdrop{background:#050805bb}
+.dialog-close{background:#29342a;color:#d0dacf}
+.room-dialog-notice{color:#f0a99c}
+.join-form .secondary-button{background:#202b21;color:#b5d9b9;border-color:#3b4b3d}
+.chat-panel{background-color:#000;background-image:radial-gradient(circle,#fff 1.4px,transparent 1.5px);background-size:24px 24px}
