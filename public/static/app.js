@@ -4,6 +4,7 @@ const welcome = document.querySelector('#welcome');
 const messages = document.querySelector('#messages');
 const composer = document.querySelector('#message-form');
 const messageInput = document.querySelector('#message-input');
+const mentionPicker = document.querySelector('#mention-picker');
 const notice = document.querySelector('#notice');
 const typingLine = document.querySelector('#typing-line');
 const usersList = document.querySelector('#users');
@@ -16,6 +17,8 @@ const joinedRoomsSelect = document.querySelector('#joined-rooms');
 const roomDialog = document.querySelector('#room-dialog');
 const availableRoomsSelect = document.querySelector('#available-rooms');
 const roomDialogUsername = document.querySelector('#room-username');
+const peoplePanel = document.querySelector('#people-panel');
+const mobileLayout = window.matchMedia('(max-width: 760px)');
 const roomCatalog = new Map();
 const roomSessions = new Map();
 
@@ -23,6 +26,16 @@ let username = '';
 let currentRoom = '';
 let replyTarget = null;
 let lastTypingSent = 0;
+let mentionOptions = [];
+let mentionIndex = 0;
+let mentionRange = null;
+
+function syncPeoplePanel() {
+  peoplePanel.open = !mobileLayout.matches;
+}
+
+syncPeoplePanel();
+mobileLayout.addEventListener?.('change', syncPeoplePanel);
 
 function showNotice(text) {
   notice.textContent = text;
@@ -88,6 +101,87 @@ function insertMention(name) {
   messageInput.dispatchEvent(new Event('input', { bubbles: true }));
   messageInput.focus();
 }
+
+function hideMentionPicker() {
+  mentionPicker.hidden = true;
+  mentionPicker.replaceChildren();
+  messageInput.setAttribute('aria-expanded', 'false');
+  mentionOptions = [];
+  mentionRange = null;
+}
+
+function updateMentionPicker() {
+  const cursor = messageInput.selectionStart;
+  const valueBeforeCursor = messageInput.value.slice(0, cursor);
+  const atIndex = valueBeforeCursor.lastIndexOf('@');
+  if (atIndex < 0 || /[\w@]/.test(valueBeforeCursor[atIndex - 1] || '')) {
+    hideMentionPicker();
+    return;
+  }
+  const queryText = valueBeforeCursor.slice(atIndex + 1);
+  if (/\s/.test(queryText)) {
+    hideMentionPicker();
+    return;
+  }
+  const query = queryText.replace(/^"/, '').toLocaleLowerCase();
+  const participants = roomSessions.get(currentRoom)?.users || [];
+  mentionOptions = participants.filter(name => name.toLocaleLowerCase().startsWith(query)).slice(0, 8);
+  mentionRange = { start: atIndex, end: cursor };
+  mentionIndex = 0;
+  mentionPicker.replaceChildren();
+  if (!mentionOptions.length) {
+    hideMentionPicker();
+    return;
+  }
+  mentionOptions.forEach((name, index) => {
+    const option = document.createElement('button');
+    option.type = 'button';
+    option.className = 'mention-option';
+    option.setAttribute('role', 'option');
+    option.setAttribute('aria-selected', String(index === mentionIndex));
+    option.textContent = name;
+    option.addEventListener('pointerdown', event => event.preventDefault());
+    option.addEventListener('click', () => chooseMention(index));
+    mentionPicker.append(option);
+  });
+  mentionPicker.hidden = false;
+  messageInput.setAttribute('aria-expanded', 'true');
+}
+
+function chooseMention(index = mentionIndex) {
+  const name = mentionOptions[index];
+  if (!name || !mentionRange) return;
+  const token = /\s/.test(name) ? `@"${name}" ` : `@${name} `;
+  const before = messageInput.value.slice(0, mentionRange.start);
+  const after = messageInput.value.slice(mentionRange.end);
+  messageInput.value = `${before}${token}${after}`;
+  const caret = before.length + token.length;
+  messageInput.setSelectionRange(caret, caret);
+  hideMentionPicker();
+  messageInput.dispatchEvent(new Event('input', { bubbles: true }));
+  messageInput.focus();
+}
+
+messageInput.addEventListener('keydown', event => {
+  if (mentionPicker.hidden || !mentionOptions.length) return;
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    event.preventDefault();
+    const step = event.key === 'ArrowDown' ? 1 : -1;
+    mentionIndex = (mentionIndex + step + mentionOptions.length) % mentionOptions.length;
+    [...mentionPicker.children].forEach((option, index) => {
+      option.setAttribute('aria-selected', String(index === mentionIndex));
+    });
+  } else if (event.key === 'Enter' || event.key === 'Tab') {
+    event.preventDefault();
+    chooseMention();
+  } else if (event.key === 'Escape') {
+    hideMentionPicker();
+  }
+});
+
+document.addEventListener('pointerdown', event => {
+  if (!composer.contains(event.target)) hideMentionPicker();
+});
 
 function renderMessageText(container, text) {
   const matcher = /(?<![\w@])@(?:"([^"\r\n]{1,20})"|([^\s@,.:;!?()]+))/g;
@@ -234,7 +328,8 @@ function updateAvailableRoomInfo() {
 
 function refreshJoinedRooms() {
   const sessions = [...roomSessions.values()];
-  roomControls.hidden = sessions.length === 0;
+  roomControls.hidden = false;
+  joinedRoomsSelect.hidden = sessions.length === 0;
   joinedRoomsSelect.replaceChildren(...sessions.map(session => {
     const option = document.createElement('option');
     option.value = session.room;
@@ -248,6 +343,7 @@ function refreshJoinedRooms() {
 function renderActiveRoom() {
   const session = roomSessions.get(currentRoom);
   if (!session) return;
+  document.querySelector('#landing-reminder').hidden = true;
   welcome.hidden = true;
   messages.style.display = 'flex';
   composer.hidden = !session.joined;
@@ -267,6 +363,7 @@ function renderTyping(session) {
 
 function showLobby() {
   currentRoom = '';
+  document.querySelector('#landing-reminder').hidden = false;
   welcome.hidden = false;
   messages.style.display = 'none';
   messages.replaceChildren();
@@ -340,7 +437,10 @@ function connectRoom(session) {
       }
     } else if (data.type === 'presence_update') {
       session.users = data.users || [];
-      if (session.room === currentRoom) renderUsers(session.users);
+      if (session.room === currentRoom) {
+        renderUsers(session.users);
+        if (!mentionPicker.hidden) updateMentionPicker();
+      }
     } else if (data.type === 'typing') {
       if (data.username === username) return;
       if (data.is_typing) session.typingUsers.add(data.username);
@@ -434,6 +534,10 @@ joinForm.addEventListener('submit', event => {
 
 composer.addEventListener('submit', event => {
   event.preventDefault();
+  if (!mentionPicker.hidden && mentionOptions.length) {
+    chooseMention();
+    return;
+  }
   const text = messageInput.value.trim();
   const session = roomSessions.get(currentRoom);
   if (!text || session?.socket?.readyState !== WebSocket.OPEN) return;
@@ -453,6 +557,7 @@ composer.addEventListener('submit', event => {
 });
 
 messageInput.addEventListener('input', () => {
+  updateMentionPicker();
   document.querySelector('#char-count').textContent = `${messageInput.value.length} / 500`;
   const session = roomSessions.get(currentRoom);
   if (session) session.draft = messageInput.value;
@@ -474,9 +579,6 @@ document.querySelector('#leave-button').addEventListener('click', () => {
 joinedRoomsSelect.addEventListener('change', () => activateRoom(joinedRoomsSelect.value));
 availableRoomsSelect.addEventListener('change', updateAvailableRoomInfo);
 document.querySelector('#manage-rooms').addEventListener('click', () => {
-  openRoomDialog();
-});
-document.querySelector('#initial-create-room').addEventListener('click', () => {
   openRoomDialog();
 });
 document.querySelector('#close-room-dialog').addEventListener('click', () => roomDialog.close());

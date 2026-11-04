@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#f5f4ef">
+  <meta name="theme-color" content="#111711">
   <title>The Hive — Realtime Chat</title>
   <link rel="stylesheet" href="/static/styles.css">
 </head>
@@ -17,10 +17,10 @@
       <header class="topbar">
         <div><p class="eyebrow">YOUR SPACE</p><h1 id="room-heading">Join a room</h1></div>
         <div class="topbar-controls">
-          <div id="room-controls" class="room-controls" hidden>
+          <div id="room-controls" class="room-controls">
             <label class="visually-hidden" for="joined-rooms">Switch room</label>
             <select id="joined-rooms" aria-label="Switch room"></select>
-            <button id="manage-rooms" type="button">+ Room</button>
+            <button id="manage-rooms" type="button">Rooms</button>
           </div>
           <div class="connection"><span id="connection-dot"></span><span id="connection-label">Not connected</span></div>
         </div>
@@ -34,7 +34,6 @@
               <label>Your name<input id="username" maxlength="20" placeholder="e.g. Ada" autocomplete="nickname" required></label>
               <label>Choose a room<select id="room"></select></label>
               <button type="submit">Join the room <span>↗</span></button>
-              <button id="initial-create-room" class="secondary-button" type="button">Create a personal room</button>
             </form>
           </div>
           <ol id="messages" class="messages" aria-live="polite" aria-label="Messages"></ol>
@@ -44,17 +43,19 @@
               <span><strong id="reply-author"></strong><span id="reply-text"></span></span>
               <button id="cancel-reply" type="button" aria-label="Cancel reply">×</button>
             </div>
-            <input id="message-input" maxlength="500" placeholder="Write a message… use @name to mention" autocomplete="off" aria-label="Message">
+            <div id="mention-picker" class="mention-picker" role="listbox" aria-label="Room participants" hidden></div>
+            <input id="message-input" maxlength="500" placeholder="Write a message… use @ to tag someone" autocomplete="off" aria-label="Message" aria-autocomplete="list" aria-controls="mention-picker" aria-expanded="false">
             <span class="char-count" id="char-count">0 / 500</span>
             <button aria-label="Send message" type="submit">↑</button>
           </form>
           <p id="notice" class="notice" role="status"></p>
         </section>
         <aside class="side-panel">
-          <div class="side-card"><div class="side-heading"><div><p class="eyebrow">IN THIS ROOM</p><h2>People</h2></div><span id="user-count" class="count">0</span></div>
+          <details id="people-panel" class="side-card" open>
+            <summary class="side-heading"><div><p class="eyebrow">IN THIS ROOM</p><h2>People</h2></div><span id="user-count" class="count">0</span></summary>
             <ul id="users" class="users"><li class="empty-users">Join a room to see who's here</li></ul>
-          </div>
-          <div class="tip-card"><span>✳</span><p><strong>A little reminder</strong><br>Good chats are built on curiosity and kindness.</p></div>
+          </details>
+          <div id="landing-reminder" class="tip-card"><span>✳</span><p><strong>A little reminder</strong><br>Good chats are built on curiosity and kindness.</p></div>
           <button id="leave-button" class="leave-button" hidden>Leave room</button>
         </aside>
       </div>
