@@ -581,6 +581,10 @@ availableRoomsSelect.addEventListener('change', updateAvailableRoomInfo);
 document.querySelector('#manage-rooms').addEventListener('click', () => {
   openRoomDialog();
 });
+document.querySelector('#initial-create-room').addEventListener('click', () => {
+  openRoomDialog();
+  document.querySelector('#private-room-name').focus();
+});
 document.querySelector('#close-room-dialog').addEventListener('click', () => roomDialog.close());
 document.querySelector('#join-listed-room').addEventListener('click', () => {
   const room = availableRoomsSelect.value;
