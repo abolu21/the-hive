@@ -35,6 +35,50 @@ create index if not exists messages_room_created_at_idx
 create index if not exists messages_reply_to_id_idx
   on public.messages (reply_to_id) where reply_to_id is not null;
 
+-- Keep only the newest 100 messages in each public room. Personal rooms have
+-- their own lifecycle and are removed when their last participant leaves.
+create or replace function public.trim_public_room_messages()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if exists (
+    select 1 from public.rooms
+    where name = new.room and is_personal = false
+  ) then
+    delete from public.messages
+    where room = new.room
+      and id not in (
+        select id from public.messages
+        where room = new.room
+        order by id desc
+        limit 100
+      );
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trim_public_room_messages_after_insert on public.messages;
+create trigger trim_public_room_messages_after_insert
+  after insert on public.messages
+  for each row execute function public.trim_public_room_messages();
+
+-- Apply the retention rule to public-room history already in the database.
+delete from public.messages m
+using public.rooms r
+where m.room = r.name
+  and r.is_personal = false
+  and m.id not in (
+    select newest.id
+    from public.messages newest
+    where newest.room = m.room
+    order by newest.id desc
+    limit 100
+  );
+
 alter table public.rooms enable row level security;
 alter table public.messages enable row level security;
 
